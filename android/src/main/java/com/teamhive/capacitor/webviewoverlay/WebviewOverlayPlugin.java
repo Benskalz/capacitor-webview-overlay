@@ -1,11 +1,14 @@
 package com.teamhive.capacitor.webviewoverlay;
 import android.annotation.SuppressLint;
+import android.content.Intent;
 import android.content.res.ColorStateList;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.net.Uri;
 import android.os.Message;
-import com.google.android.material.floatingactionbutton.FloatingActionButton;
+//import com.google.android.material.floatingactionbutton.FloatingActionButton;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.MimeTypeMap;
@@ -63,7 +66,9 @@ public class WebviewOverlayPlugin extends Plugin {
     private WebView webView;
     private boolean hidden = false;
     private boolean fullscreen = false;
-    private FloatingActionButton closeFullscreenButton;
+    private boolean backButtonListenerRegistered = false;
+
+//  private FloatingActionButton closeFullscreenButton;
     private int width;
     private int height;
     private float x;
@@ -78,8 +83,30 @@ public class WebviewOverlayPlugin extends Plugin {
     @Override
     public void load() {
         super.load();
+         // Register Android back button handler using Capacitor
+        if (!backButtonListenerRegistered) {
+            getActivity().getOnBackPressedDispatcher().addCallback( new androidx.activity.OnBackPressedCallback(true) {
+                @Override
+                public void handleOnBackPressed() {
+                    // When back button is pressed
+                    handleBackButtonPress();
+                }
+            });
+            backButtonListenerRegistered = true;
+        }
     }
-
+   /**
+     * Handle the Android back button press event.
+     */
+    private void handleBackButtonPress() {
+        if (webView != null && webView.canGoBack()) {
+            // Go back in WebView if it has history
+            webView.goBack();
+        } else {
+            // Perform default behavior (exit app or go to previous activity)
+            getActivity().onBackPressed();
+        }
+    }
     private float getPixels(int value) {
         return value * getContext().getResources().getDisplayMetrics().density + 0.5f;
     }
@@ -100,7 +127,7 @@ public class WebviewOverlayPlugin extends Plugin {
                 settings.setJavaScriptEnabled(true);
                 settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
                 settings.setDomStorageEnabled(true);
-                settings.setSupportMultipleWindows(true);
+                settings.setSupportMultipleWindows(false);
                 String userAgent = call.getString("userAgent", "");
                 if (!userAgent.isEmpty()) {
                     settings.setUserAgentString(String.format("%s %s", settings.getUserAgentString(), userAgent));
@@ -113,22 +140,23 @@ public class WebviewOverlayPlugin extends Plugin {
 
                 final int injectionTime = call.getInt("injectionTime", 0);
 
-                closeFullscreenButton = new FloatingActionButton(getContext());
-                closeFullscreenButton.setBackgroundTintList(ColorStateList.valueOf(Color.parseColor("#626272")));
-                closeFullscreenButton.setSize(FloatingActionButton.SIZE_MINI);
-                closeFullscreenButton.setImageResource(R.drawable.icon);
-                closeFullscreenButton.setX(getPixels(10));
-                closeFullscreenButton.setY(getPixels(10));
-                closeFullscreenButton.setOnClickListener(new View.OnClickListener() {
-                    @Override
-                    public void onClick(View v) {
-                        toggleFullscreen(null);
-                    }
-                });
-                closeFullscreenButton.setVisibility(View.GONE);
-                webView.addView(closeFullscreenButton);
+                //closeFullscreenButton = new FloatingActionButton(getContext());
 
+                //webView.addView(closeFullscreenButton);
 
+                webView.setOnKeyListener(new View.OnKeyListener() {
+                                    @Override
+                                    public boolean onKey(View v, int keyCode, KeyEvent event) {
+                                        if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                                            if (keyCode == KeyEvent.KEYCODE_BACK && webView.canGoBack()) {
+                                                // WebView goes back on Back button press
+                                                webView.goBack();
+                                                return true;
+                                            }
+                                        }
+                                        return false;
+                                    }
+                                });
                 webView.setWebChromeClient(new WebChromeClient() {
                     @Override
                     public void onProgressChanged(WebView view, int progress) {
@@ -197,6 +225,40 @@ public class WebviewOverlayPlugin extends Plugin {
                     }
                     @Override
                     public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                        // Handle deep links (schemes like tel:, mailto:, geo:, etc.)
+                        if (url != null) {
+                            try {
+                                Uri uri = Uri.parse(url);
+                                String scheme = uri.getScheme();
+
+                                // Common schemes that should be handled by the system
+                                if (scheme != null && (
+                                    scheme.equals("tel") || 
+                                    scheme.equals("mailto") || 
+                                    scheme.equals("sms") || 
+                                    scheme.equals("geo") ||
+                                    scheme.equals("market") ||
+                                    scheme.equals("intent") ||
+                                    scheme.equals("whatsapp") ||
+                                    scheme.equals("fb") ||
+                                    scheme.equals("twitter") ||
+                                    !scheme.equals("http") && !scheme.equals("https"))) {
+
+                                    // Let the system handle the URL with an Intent
+                                    Intent intent = new Intent(Intent.ACTION_VIEW, uri);
+                                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                                    try {
+                                        getContext().startActivity(intent);
+                                        return true;
+                                    } catch (Exception e) {
+                                        // If there's no activity to handle the intent, we'll 
+                                        // continue with regular url handling
+                                    }
+                                }
+                            } catch (Exception e) {
+                                // On any error, fall through to regular URL handling
+                            }
+                        }
 
                         if (hasListeners("navigationHandler")) {
                             handleNavigation(url, false);
@@ -425,7 +487,7 @@ public class WebviewOverlayPlugin extends Plugin {
                         webView.setY(y);
                         webView.requestLayout();
                         fullscreen = false;
-                        closeFullscreenButton.setVisibility(View.GONE);
+                        //closeFullscreenButton.setVisibility(View.GONE);
                     }
                     else {
                         ViewGroup.LayoutParams params = webView.getLayoutParams();
@@ -435,7 +497,7 @@ public class WebviewOverlayPlugin extends Plugin {
                         webView.setY(0);
                         webView.requestLayout();
                         fullscreen = true;
-                        closeFullscreenButton.setVisibility(View.VISIBLE);
+                        //closeFullscreenButton.setVisibility(View.VISIBLE);
                     }
                 }
                 if (call != null) {
