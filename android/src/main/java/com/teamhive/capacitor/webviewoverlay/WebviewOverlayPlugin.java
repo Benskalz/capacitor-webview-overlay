@@ -8,6 +8,7 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Message;
 //import com.google.android.material.floatingactionbutton.FloatingActionButton;
+import android.util.Log;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
@@ -222,6 +223,15 @@ public class WebviewOverlayPlugin extends Plugin {
                             loadUrlCall = null;
                         }
                         notifyListeners("pageLoaded", new JSObject());
+                    }
+
+                    @Override
+                    public void doUpdateVisitedHistory(WebView view, String url, boolean isReload) {
+                        // allow to notify url even when changed by javascript
+                        super.doUpdateVisitedHistory(view, url, isReload);
+                        if (hasListeners("navigationHandler") && !isReload) {
+                            handleNavigation(url, false);
+                        }
                     }
                     @Override
                     public boolean shouldOverrideUrlLoading(WebView view, String url) {
