@@ -21,6 +21,47 @@ class WebviewOverlay: UIViewController, WKUIDelegate, WKNavigationDelegate {
 
     var loadUrlCall: CAPPluginCall?
 
+    
+    
+    
+    
+    var webViewURLObserver: NSKeyValueObservation?
+       
+     
+       
+    func setupURLObserver() {
+        // Observe URL changes with modern KVO syntax
+        webViewURLObserver = webview?.observe(\.url, options: [.new]) { [weak self] webView, change in
+            guard let self = self else { return }
+            let newUrl = change.newValue ?? nil
+            
+            // Only notify if URL actually changed and it's the main frame URL
+            if self.currentUrl?.absoluteString != newUrl?.absoluteString {
+                // Check if this is a main frame navigation
+                // We can determine this by comparing with the webView.url which always represents the main frame
+                if webView.url?.absoluteString == newUrl?.absoluteString {
+                    self.currentUrl = newUrl as? URL
+                    
+                    // Notify that URL has changed if listeners are registered
+                    if (self.plugin.hasListeners("navigationHandler")) {
+                        self.plugin.notifyListeners("navigationHandler", data: [
+                            "url": newUrl?.absoluteString ?? "",
+                            "newWindow": false,
+                            "sameHost": true, // Assuming same host as it's typically a JS navigation
+                            "currentUrl": newUrl?.absoluteString ?? "",
+                            "isJsNavigation": true
+                        ])
+                    }
+                }
+            }
+        }
+    }
+       
+      
+    
+    
+    
+    
     init(_ plugin: WebviewOverlayPlugin, configuration: WKWebViewConfiguration) {
         super.init(nibName: "WebviewOverlay", bundle: nil)
         self.plugin = plugin
@@ -49,6 +90,9 @@ class WebviewOverlay: UIViewController, WKUIDelegate, WKNavigationDelegate {
             }
             
             // Handle navigation event if listeners are registered
+            if webView.url?.absoluteString == url.absoluteString {
+//                self.currentUrl = newUrl as? URL
+                
             if (plugin.hasListeners("navigationHandler")) {
                 self.openNewWindow = navigationAction.targetFrame == nil
                 plugin.notifyListeners("navigationHandler", data: [
@@ -61,6 +105,7 @@ class WebviewOverlay: UIViewController, WKUIDelegate, WKNavigationDelegate {
                     decisionHandler(policy == .allow ? .allow : .cancel)
                 }
                 return
+            }
             }
         }
         
@@ -78,7 +123,15 @@ class WebviewOverlay: UIViewController, WKUIDelegate, WKNavigationDelegate {
         self.webview?.allowsBackForwardNavigationGestures = true
 
         self.webview?.isOpaque = false
-
+        
+        
+        // Rest of existing loadView implementation...
+        
+        // Add observer for URL changes
+        setupURLObserver()
+        
+        // Existing observer for progress
+        self.webview?.addObserver(self, forKeyPath: #keyPath(WKWebView.estimatedProgress), options: .new, context: nil)
         let button = UIButton(frame: CGRect(x: UIScreen.main.bounds.width - 60, y: 20, width: 40, height: 40))
         let image = UIImage(named: "icon", in: Bundle(for: NSClassFromString("WebviewOverlayPlugin")!), compatibleWith: nil)
         button.setImage(image, for: .normal)
@@ -158,15 +211,15 @@ class WebviewOverlay: UIViewController, WKUIDelegate, WKNavigationDelegate {
         if (self.currentDecisionHandler != nil) {
             self.clearDecisionHandler()
         }
-        if (plugin.hasListeners("navigationHandler")) {
-            self.currentDecisionHandler = decisionHandler
-            plugin.notifyListeners("navigationHandler", data: [
-                "url": navigationResponse.response.url?.absoluteString ?? "",
-                "newWindow": self.openNewWindow,
-                "sameHost": currentUrl?.host == navigationResponse.response.url?.host
-            ])
-            self.openNewWindow = false
-        }
+//        if (plugin.hasListeners("navigationHandler")) {
+//            self.currentDecisionHandler = decisionHandler
+//            plugin.notifyListeners("navigationHandler", data: [
+//                "url": navigationResponse.response.url?.absoluteString ?? "",
+//                "newWindow": self.openNewWindow,
+//                "sameHost": currentUrl?.host == navigationResponse.response.url?.host
+//            ])
+//            self.openNewWindow = false
+//        }
         else {
             decisionHandler(.allow)
             return
@@ -335,8 +388,14 @@ public class WebviewOverlayPlugin: CAPPlugin {
             self.y = CGFloat(call.getFloat("y") ?? 0)
 
             if (!self.fullscreen) {
-                let rect = CGRect(x: self.x, y: self.y, width: self.width, height: self.height)
-                self.webviewOverlay.view.frame = rect
+                if let overlay = self.webviewOverlay {
+                    let rect = CGRect(x: self.x, y: self.y, width: self.width, height: self.height)
+                    overlay.view.frame = rect
+                } else {
+                    // Handle the case when webviewOverlay is nil
+                    print("Warning: webviewOverlay is nil")
+                    // You might want to initialize it here or take some other action
+                }
             }
             else {
                 let width = UIScreen.main.bounds.width
@@ -345,8 +404,16 @@ public class WebviewOverlayPlugin: CAPPlugin {
                 self.webviewOverlay.view.frame = rect
             }
 
-            if (self.webviewOverlay.topSafeArea != nil && self.webviewOverlay.closeFullscreenButton != nil) {
-                self.webviewOverlay.closeFullscreenButton.frame = CGRect(x: UIScreen.main.bounds.width - 60, y: self.webviewOverlay.topSafeArea + 20, width: 40, height: 40)
+            if let overlay = self.webviewOverlay {
+                if let topSafeArea = overlay.topSafeArea,
+                   let closeButton = overlay.closeFullscreenButton {
+                    closeButton.frame = CGRect(
+                        x: UIScreen.main.bounds.width - 60,
+                        y: topSafeArea + 20,
+                        width: 40,
+                        height: 40
+                    )
+                }
             }
             
             if (self.hidden) {
