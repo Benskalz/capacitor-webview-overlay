@@ -272,7 +272,7 @@ public class WebviewOverlayPlugin extends Plugin {
 
                         if (hasListeners("navigationHandler")) {
                             handleNavigation(url, false);
-                            return true;
+                            return false;
                         }
                         else {
                             targetUrl = null;
