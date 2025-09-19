@@ -250,6 +250,8 @@ public class WebviewOverlayPlugin extends Plugin {
                                     scheme.equals("market") ||
                                     scheme.equals("intent") ||
                                     scheme.equals("whatsapp") ||
+                                    scheme.equals("nan") ||
+                                    scheme.equals("nanchat") ||
                                     scheme.equals("fb") ||
                                     scheme.equals("twitter") ||
                                     !scheme.equals("http") && !scheme.equals("https"))) {
@@ -272,6 +274,9 @@ public class WebviewOverlayPlugin extends Plugin {
 
                         if (hasListeners("navigationHandler")) {
                             handleNavigation(url, false);
+                            if (url.startsWith("https://nanchat.com/")) {
+                                return true;
+                            }
                             return false;
                         }
                         else {
@@ -308,12 +313,12 @@ public class WebviewOverlayPlugin extends Plugin {
                 ((ViewGroup) getBridge().getWebView().getParent()).addView(webView);
 
                 if (urlString.contains("file:")) {
-                    try {
-                        server = new MyHTTPD();
-                        server.start();
-                    } catch (Exception e) {}
+                    //try {
+                        //server = new MyHTTPD();
+                      //  server.start();
+                    //} catch (Exception e) {}
 
-                    webView.loadUrl(urlString.replace("file://", "http://localhost:8080"));
+                   // webView.loadUrl(urlString.replace("file://", "http://localhost:8080"));
                 }
                 else {
                     webView.loadUrl(urlString);
