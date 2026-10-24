@@ -12,7 +12,6 @@ import android.util.Log;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
-import android.webkit.MimeTypeMap;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
@@ -27,43 +26,27 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import com.teamhive.capacitor.webviewoverlay.R;
 
 import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.IOException;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 import android.util.Base64;
-
-import fi.iki.elonen.NanoHTTPD;
-
-class MyHTTPD extends NanoHTTPD {
-    public static final int PORT = 8080;
-
-    public MyHTTPD() throws IOException {
-        super(PORT);
-    }
-
-    @Override
-    public Response serve(IHTTPSession session) {
-        String uri = session.getUri();
-
-        try {
-            File file = new File(uri);
-            FileInputStream fis = new FileInputStream(file);
-
-            String extension = MimeTypeMap.getFileExtensionFromUrl(uri);
-            String mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension);
-
-            return newChunkedResponse(Response.Status.OK, mimeType, fis);
-
-        } catch(Exception e) {}
-
-        return null;
-    }
-}
 
 @CapacitorPlugin(name = "WebviewOverlayPlugin")
 public class WebviewOverlayPlugin extends Plugin {
+    // Non-http(s) schemes a page may hand off to another app (ACTION_VIEW).
+    // Anything else (file:, content:, intent:, javascript:, unknown) is blocked.
+    private static final Set<String> EXTERNAL_SCHEMES = new HashSet<>(Arrays.asList(
+        "tel", "mailto", "sms", "geo", "market", "whatsapp", "fb", "twitter",
+        // wallet deep links, handled by NanChat itself (see AndroidManifest)
+        "nano", "nan", "nanauth", "ban", "xdg", "ana", "xro"
+    ));
+    // Non-http(s) schemes that may load inside the overlay (in-page frames).
+    private static final Set<String> INLINE_SCHEMES = new HashSet<>(Arrays.asList(
+        "about", "blob", "data"
+    ));
+
     private WebView webView;
     private boolean hidden = false;
     private boolean fullscreen = false;
@@ -78,8 +61,6 @@ public class WebviewOverlayPlugin extends Plugin {
     private String targetUrl;
 
     private PluginCall loadUrlCall;
-
-    private MyHTTPD server;
 
     @Override
     public void load() {
@@ -121,12 +102,14 @@ public class WebviewOverlayPlugin extends Plugin {
                 hidden = false;
                 webView = new WebView(getContext());
                 WebSettings settings = webView.getSettings();
-                settings.setAllowContentAccess(true);
-                settings.setAllowFileAccess(true);
-                settings.setAllowFileAccessFromFileURLs(true);
-                settings.setAllowUniversalAccessFromFileURLs(true);
+                // Remote pages only: no access to local files or content providers,
+                // and no http subresources on https pages.
+                settings.setAllowContentAccess(false);
+                settings.setAllowFileAccess(false);
+                settings.setAllowFileAccessFromFileURLs(false);
+                settings.setAllowUniversalAccessFromFileURLs(false);
                 settings.setJavaScriptEnabled(true);
-                settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+                settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
                 settings.setDomStorageEnabled(true);
                 settings.setSupportMultipleWindows(false);
                 String userAgent = call.getString("userAgent", "");
@@ -235,41 +218,26 @@ public class WebviewOverlayPlugin extends Plugin {
                     }
                     @Override
                     public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                        // Handle deep links (schemes like tel:, mailto:, geo:, etc.)
-                        if (url != null) {
-                            try {
-                                Uri uri = Uri.parse(url);
-                                String scheme = uri.getScheme();
-
-                                // Common schemes that should be handled by the system
-                                if (scheme != null && (
-                                    scheme.equals("tel") || 
-                                    scheme.equals("mailto") || 
-                                    scheme.equals("sms") || 
-                                    scheme.equals("geo") ||
-                                    scheme.equals("market") ||
-                                    scheme.equals("intent") ||
-                                    scheme.equals("whatsapp") ||
-                                    scheme.equals("nan") ||
-                                    scheme.equals("nanchat") ||
-                                    scheme.equals("fb") ||
-                                    scheme.equals("twitter") ||
-                                    !scheme.equals("http") && !scheme.equals("https"))) {
-
-                                    // Let the system handle the URL with an Intent
-                                    Intent intent = new Intent(Intent.ACTION_VIEW, uri);
-                                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                                    try {
-                                        getContext().startActivity(intent);
-                                        return true;
-                                    } catch (Exception e) {
-                                        // If there's no activity to handle the intent, we'll 
-                                        // continue with regular url handling
-                                    }
+                        if (url == null) {
+                            return true;
+                        }
+                        String scheme = Uri.parse(url).getScheme();
+                        scheme = scheme == null ? "" : scheme.toLowerCase();
+                        if (!scheme.equals("http") && !scheme.equals("https")) {
+                            if (EXTERNAL_SCHEMES.contains(scheme)) {
+                                // Let another app (or NanChat itself) handle the deep link
+                                Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                                intent.addCategory(Intent.CATEGORY_BROWSABLE);
+                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                                try {
+                                    getContext().startActivity(intent);
+                                } catch (Exception e) {
+                                    // no app installed to handle it
                                 }
-                            } catch (Exception e) {
-                                // On any error, fall through to regular URL handling
+                                return true;
                             }
+                            // about:/blob:/data: frames load in place, everything else is blocked
+                            return !INLINE_SCHEMES.contains(scheme);
                         }
 
                         if (hasListeners("navigationHandler")) {
@@ -312,17 +280,7 @@ public class WebviewOverlayPlugin extends Plugin {
 
                 ((ViewGroup) getBridge().getWebView().getParent()).addView(webView);
 
-                if (urlString.contains("file:")) {
-                    //try {
-                        //server = new MyHTTPD();
-                      //  server.start();
-                    //} catch (Exception e) {}
-
-                   // webView.loadUrl(urlString.replace("file://", "http://localhost:8080"));
-                }
-                else {
-                    webView.loadUrl(urlString);
-                }
+                webView.loadUrl(urlString);
               call.resolve();
             }
         });
@@ -352,9 +310,6 @@ public class WebviewOverlayPlugin extends Plugin {
             @Override
             public void run() {
             if (webView != null) {
-                if (server != null && server.isAlive()) {
-                    server.stop();
-                }
                 ViewGroup rootGroup = ((ViewGroup) getBridge().getWebView().getParent());
                 int count = rootGroup.getChildCount();
                 if (count > 1) {
