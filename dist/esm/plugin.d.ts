@@ -39,6 +39,8 @@ declare class WebviewOverlayClass {
         url: string;
         newWindow: boolean;
         sameHost: boolean;
+        /** Page that triggered the navigation (wallet deep links on Android/iOS, all navigations on Android). */
+        pageUrl?: string;
         complete: (allow: boolean) => void;
     }) => void): void;
     toggleFullscreen(): void;

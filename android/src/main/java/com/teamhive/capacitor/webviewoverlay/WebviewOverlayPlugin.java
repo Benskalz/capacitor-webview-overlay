@@ -42,6 +42,12 @@ public class WebviewOverlayPlugin extends Plugin {
         // wallet deep links, handled by NanChat itself (see AndroidManifest)
         "nano", "nan", "nanauth", "ban", "xdg", "ana", "xro"
     ));
+    // NanChat's own deep links: sent to the JS navigationHandler (with the page
+    // that triggered them) instead of a system Intent, so the app knows the
+    // request came from this page and not from an outside link or QR code.
+    private static final Set<String> WALLET_SCHEMES = new HashSet<>(Arrays.asList(
+        "nano", "nan", "nanauth", "ban", "xdg", "ana", "xro"
+    ));
     // Non-http(s) schemes that may load inside the overlay (in-page frames).
     private static final Set<String> INLINE_SCHEMES = new HashSet<>(Arrays.asList(
         "about", "blob", "data"
@@ -224,6 +230,16 @@ public class WebviewOverlayPlugin extends Plugin {
                         String scheme = Uri.parse(url).getScheme();
                         scheme = scheme == null ? "" : scheme.toLowerCase();
                         if (!scheme.equals("http") && !scheme.equals("https")) {
+                            if (WALLET_SCHEMES.contains(scheme) && hasListeners("navigationHandler")) {
+                                targetUrl = null;
+                                JSObject value = new JSObject();
+                                value.put("url", url);
+                                value.put("newWindow", false);
+                                value.put("sameHost", false);
+                                value.put("pageUrl", view.getUrl());
+                                notifyListeners("navigationHandler", value);
+                                return true;
+                            }
                             if (EXTERNAL_SCHEMES.contains(scheme)) {
                                 // Let another app (or NanChat itself) handle the deep link
                                 Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
@@ -298,6 +314,8 @@ public class WebviewOverlayPlugin extends Plugin {
             navigationHandlerValue.put("url", url);
             navigationHandlerValue.put("newWindow", newWindow);
             navigationHandlerValue.put("sameHost", sameHost);
+            // page that triggered the navigation (getUrl() is still the committed page here)
+            navigationHandlerValue.put("pageUrl", webView.getUrl());
 
             notifyListeners("navigationHandler", navigationHandlerValue);
         }

@@ -80,6 +80,22 @@ class WebviewOverlay: UIViewController, WKUIDelegate, WKNavigationDelegate {
         if let url = navigationAction.request.url {
             // Check if the URL is a deep link (non-http/https scheme)
             let scheme = url.scheme?.lowercased() ?? ""
+            // NanChat's own deep links: sent to the JS navigationHandler (with the
+            // page that triggered them) instead of the OS, so the app knows the
+            // request came from this page and not from an outside link or QR code.
+            let walletSchemes: Set<String> = ["nano", "nan", "nanauth", "ban", "xdg", "ana", "xro"]
+            if walletSchemes.contains(scheme) && plugin.hasListeners("navigationHandler") {
+                // decided before the navigation starts, so webView.url is still the triggering page
+                let pageUrl = webView.url
+                self.currentDecisionHandler = { _ in decisionHandler(.cancel) }
+                plugin.notifyListeners("navigationHandler", data: [
+                    "url": url.absoluteString,
+                    "newWindow": false,
+                    "sameHost": false,
+                    "pageUrl": pageUrl?.absoluteString ?? ""
+                ])
+                return
+            }
             if scheme != "http" && scheme != "https" && scheme != "file" && scheme != "about" {
                 // This is likely a deep link
                 if UIApplication.shared.canOpenURL(url) {
