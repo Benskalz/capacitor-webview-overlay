@@ -84,7 +84,13 @@ class WebviewOverlay: UIViewController, WKUIDelegate, WKNavigationDelegate {
             // page that triggered them) instead of the OS, so the app knows the
             // request came from this page and not from an outside link or QR code.
             let walletSchemes: Set<String> = ["nano", "nan", "nanauth", "ban", "xdg", "ana", "xro"]
-            if walletSchemes.contains(scheme) && plugin.hasListeners("navigationHandler") {
+            // https://nanchat.com/?uri= links: same handling, otherwise they only reach JS as a
+            // URL change after the webview has left the page (no pageUrl, and nanchat.com loads)
+            let isNanChatUriLink = scheme == "https"
+                && url.host?.lowercased() == "nanchat.com"
+                && (url.path.isEmpty || url.path == "/")
+                && (URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.contains { $0.name == "uri" } ?? false)
+            if (walletSchemes.contains(scheme) || isNanChatUriLink) && plugin.hasListeners("navigationHandler") {
                 // decided before the navigation starts, so webView.url is still the triggering page
                 let pageUrl = webView.url
                 self.currentDecisionHandler = { _ in decisionHandler(.cancel) }
